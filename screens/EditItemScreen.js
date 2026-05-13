@@ -15,17 +15,19 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 
 import { useAuth } from '../src/hooks';
-import { createDonationItem } from '../src/services/itemService';
+import { updateDonationItem } from '../src/services/itemService';
 import { getSafeErrorMessage } from '../src/utils/errorMessages';
 
-export default function DonateScreen() {
+export default function EditItemScreen({ navigation, route }) {
   const { user } = useAuth();
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
+  const { item } = route.params;
+  const [title, setTitle] = useState(item.titulo || '');
+  const [description, setDescription] = useState(item.descricao || '');
+  const [category, setCategory] = useState(item.categoria || '');
   const [photo, setPhoto] = useState(null);
   const [loadingCamera, setLoadingCamera] = useState(false);
   const [saving, setSaving] = useState(false);
+  const isOwner = user?.id === item.user_id;
 
   async function handleTakePhoto() {
     if (saving) {
@@ -56,8 +58,13 @@ export default function DonateScreen() {
     }
   }
 
-  async function handleSubmit() {
+  async function handleSave() {
     if (saving) {
+      return;
+    }
+
+    if (!isOwner) {
+      Alert.alert('Sem permissao', 'Voce nao pode editar esta doacao.');
       return;
     }
 
@@ -66,35 +73,23 @@ export default function DonateScreen() {
       return;
     }
 
-    if (!photo) {
-      Alert.alert('Foto obrigatoria', 'Tire uma foto do item antes de cadastrar.');
-      return;
-    }
-
-    if (!user?.id) {
-      Alert.alert('Sessao invalida', 'Entre novamente para cadastrar uma doacao.');
-      return;
-    }
-
     try {
       setSaving(true);
-      await createDonationItem({
+      const updatedItem = await updateDonationItem({
+        itemId: item.id,
         title: title.trim(),
         description: description.trim(),
         category: category.trim(),
-        photoUri: photo.uri,
+        currentImagePath: item.image_path,
+        newPhotoUri: photo?.uri,
       });
 
-      setTitle('');
-      setDescription('');
-      setCategory('');
-      setPhoto(null);
-
-      Alert.alert('Sucesso', 'Doacao cadastrada com sucesso.');
+      Alert.alert('Sucesso', 'Doacao atualizada com sucesso.');
+      navigation.replace('ItemDetails', { item: updatedItem });
     } catch (error) {
       Alert.alert(
-        'Erro ao cadastrar',
-        getSafeErrorMessage(error, 'Nao foi possivel cadastrar a doacao agora.'),
+        'Erro ao salvar',
+        getSafeErrorMessage(error, 'Nao foi possivel atualizar esta doacao agora.'),
       );
     } finally {
       setSaving(false);
@@ -107,34 +102,15 @@ export default function DonateScreen() {
       style={styles.container}
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Cadastrar doacao</Text>
-        <Text style={styles.subtitle}>Informe os dados basicos do item que deseja doar.</Text>
+        <Text style={styles.title}>Editar doacao</Text>
 
-        <Text style={styles.label}>Titulo</Text>
-        <TextInput
-          onChangeText={setTitle}
-          placeholder="Ex: Mochila escolar"
-          style={styles.input}
-          value={title}
-        />
-
-        <Text style={styles.label}>Descricao</Text>
-        <TextInput
-          multiline
-          onChangeText={setDescription}
-          placeholder="Descreva o estado do item"
-          style={[styles.input, styles.textArea]}
-          textAlignVertical="top"
-          value={description}
-        />
-
-        <Text style={styles.label}>Categoria</Text>
-        <TextInput
-          onChangeText={setCategory}
-          placeholder="Ex: Roupas, livros, moveis"
-          style={styles.input}
-          value={category}
-        />
+        <View style={styles.imageBox}>
+          {photo?.uri || item.image_url ? (
+            <Image source={{ uri: photo?.uri || item.image_url }} style={styles.previewImage} />
+          ) : (
+            <Text style={styles.placeholderText}>Sem foto disponivel</Text>
+          )}
+        </View>
 
         <Pressable
           disabled={loadingCamera || saving}
@@ -148,20 +124,34 @@ export default function DonateScreen() {
           {loadingCamera ? (
             <ActivityIndicator color="#2f7d57" />
           ) : (
-            <Text style={styles.secondaryButtonText}>Tirar foto do item</Text>
+            <Text style={styles.secondaryButtonText}>Trocar foto</Text>
           )}
         </Pressable>
 
-        {photo ? (
-          <View style={styles.photoPreviewBox}>
-            <Image source={{ uri: photo.uri }} style={styles.photoPreview} />
-            <Text style={styles.photoText}>Foto adicionada</Text>
-          </View>
-        ) : null}
+        <Text style={styles.label}>Titulo</Text>
+        <TextInput onChangeText={setTitle} placeholder="Titulo" style={styles.input} value={title} />
+
+        <Text style={styles.label}>Descricao</Text>
+        <TextInput
+          multiline
+          onChangeText={setDescription}
+          placeholder="Descricao"
+          style={[styles.input, styles.textArea]}
+          textAlignVertical="top"
+          value={description}
+        />
+
+        <Text style={styles.label}>Categoria</Text>
+        <TextInput
+          onChangeText={setCategory}
+          placeholder="Categoria"
+          style={styles.input}
+          value={category}
+        />
 
         <Pressable
           disabled={saving}
-          onPress={handleSubmit}
+          onPress={handleSave}
           style={({ pressed }) => [
             styles.primaryButton,
             pressed && styles.buttonPressed,
@@ -171,7 +161,7 @@ export default function DonateScreen() {
           {saving ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.primaryButtonText}>Cadastrar doacao</Text>
+            <Text style={styles.primaryButtonText}>Salvar alteracoes</Text>
           )}
         </Pressable>
       </ScrollView>
@@ -192,12 +182,28 @@ const styles = StyleSheet.create({
     color: '#245442',
     fontSize: 26,
     fontWeight: '700',
-    marginBottom: 6,
+    marginBottom: 16,
   },
-  subtitle: {
+  imageBox: {
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderColor: '#d8e0da',
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 190,
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  previewImage: {
+    borderRadius: 8,
+    height: '100%',
+    resizeMode: 'contain',
+    width: '100%',
+  },
+  placeholderText: {
     color: '#52645b',
     fontSize: 15,
-    marginBottom: 24,
+    fontWeight: '700',
   },
   label: {
     color: '#2d3a34',
@@ -226,33 +232,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     justifyContent: 'center',
-    marginBottom: 14,
+    marginBottom: 18,
     minHeight: 48,
   },
   secondaryButtonText: {
     color: '#2f7d57',
     fontSize: 16,
     fontWeight: '700',
-  },
-  photoPreviewBox: {
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderColor: '#d8e0da',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 16,
-    padding: 12,
-  },
-  photoPreview: {
-    borderRadius: 8,
-    height: 120,
-    marginBottom: 8,
-    width: 160,
-  },
-  photoText: {
-    color: '#52645b',
-    fontSize: 14,
-    fontWeight: '600',
   },
   primaryButton: {
     alignItems: 'center',
